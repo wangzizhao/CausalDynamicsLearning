@@ -1,0 +1,223 @@
+{
+    "info": "chemical_collider_task_cmi",
+    "obs_keys": ["obj0", "obj1", "obj2", "obj3", "obj4"],
+    "goal_keys": ["target_obj0", "target_obj1", "target_obj2", "target_obj3", "target_obj4"],
+    "seed": 0,
+    "cuda_id": 0,
+    "env_params": {
+        "env_name": "Chemical",
+        "num_env": 1,
+        "causal_env_params": {
+            "robots": "UR5e",
+            "controller_name": "OSC_POSITION",
+            "gripper_types": "RethinkGripper",
+            "use_camera_obs": false,
+            "camera_names": "agentview",
+            "camera_heights": 128,
+            "camera_widths": 128,
+            "camera_depths": false,
+            "control_freq": 10,
+            "horizon": 250,
+            "reward_scale": 1.0,
+            "num_movable_objects": 1,
+            "num_unmovable_objects": 1,
+            "num_random_objects": 1,
+            "num_markers": 3
+        },
+        "physical_env_params": {
+            "width": 5,
+            "height": 5,
+            "render_type": "shapes",
+            "mode": "Train",
+            "max_steps": 100,
+            "num_objects": 5,
+            "num_weights": 5,
+            "dense_reward": true
+        },
+        "chemical_env_params": {
+            "num_objects": 5,
+            "num_colors": 5,
+            "continuous_pos": true,
+            "width_std": 1,
+            "height_std": 1,
+            "width": 5,
+            "height": 5,
+            "render_image": false,
+            "render_type": "shapes",
+            "shape_size": 16,
+            "movement": "Dynamic",
+            "use_cuda": false,
+            "max_steps": 50,
+            "num_target_interventions": 30,
+            "g": "{0-3}->4",
+            "match_type": "all",
+            "dense_reward": true
+        }
+    },
+    "training_params": {
+        "inference_algo": "cmi",
+        "rl_algo": "model_based",
+        "load_inference": "put_model_path_here",
+        "load_model_based": "",
+        "load_policy": "",
+        "load_replay_buffer": "",
+        "total_steps": 500000,
+        "init_steps": 250,
+        "collect_env_step": true,
+        "inference_gradient_steps": 0,
+        "policy_gradient_steps": 1,
+        "saving_freq": 5000,
+        "plot_freq": 10000,
+        "replay_buffer_params": {
+            "capacity": 500000,
+            "max_sample_time": 128,
+            "saving_freq": 0,
+            "prioritized_buffer": false,
+            "prioritized_alpha": 0.2
+        }
+    },
+    "encoder_params": {
+        "encoder_type": "identity"
+    },
+    "inference_params": {
+        "n_pred_step": 2,
+        "batch_size": 64,
+        "lr": 1e-4,
+        "train_prop": 0.9,
+        "residual": true,
+        "log_std_min": -20,
+        "log_std_max": 0,
+        "grad_clip_norm": 20000,
+        "cmi_params": {
+            "feature_fc_dims": [64, 64],
+            "generative_fc_dims": [64, 64],
+            "causal_pred_reward_weight": 0.0,
+            "pred_diff_reward_weight": 1.0,
+            "eval_tau": 0.999,
+            "eval_freq": 10,
+            "eval_steps": 1,
+            "eval_batch_size": 32,
+            "CMI_threshold": 0.02
+        },
+        "nps_params": {
+            "num_rule": 4,
+            "rule_embed_dim": 32,
+            "rule_selector_dim": 32,
+            "cond_selector_dim": 32,
+            "feature_fc_dims": [64, 64],
+            "rule_fc_dims": [64, 64]
+        },
+        "reg_params": {
+            "use_mask": false,
+            "interv_mask_init": 0.9,
+            "adjacency_init": 0.7,
+            "flip_prob_init": 0.1,
+            "flip_prob_final": 0.0,
+            "lambda_M_init": 0.0,
+            "lambda_M_final": 0.01,
+            "lambda_I_init": 0.0,
+            "lambda_I_final": 0.01,
+            "mask_threshold": 0.5,
+            "reg_annealing_start": 20000,
+            "reg_annealing_end": 20001
+        },
+        "mlp_params": {
+            "fc_dims": [256, 256, 256]
+        },
+        "gnn_params": {
+            "node_attr_dim": 256,
+            "edge_attr_dim": 256,
+            "embedder_dims": [],
+            "edge_net_dims": [256, 256],
+            "node_net_dims": [256, 256],
+            "projector_dims": []
+        }
+    },
+    "policy_params": {
+        "batch_size": 32,
+        "lr": 3e-4,
+        "n_reward_step": 1,
+        "discount": 0.995,
+        "ppo_params": {
+            "fc_dims": [128, 128],
+            "ratio_clip": 0.1,
+            "lambda_entropy": 0.20,
+            "lambda_gae_adv": 0.98,
+            "log_std_min": -10,
+            "log_std_max": 2,
+            "if_use_gae": true,
+            "if_use_global_action_std": true,
+            "batch_size": 32,
+            "target_step": 250
+        },
+        "hippo_params": {
+            "uniform_action": false,
+            "skill_net_dims": [64, 64],
+            "obj_net_dims": [64, 64],
+            "skill_params_net_dims": [64, 64],
+            "critic_net_dims": [128, 128],
+            "skill_names": ["atomic", "reach", "grasp", "lift", "push", "open"],
+            "skill_params": {
+                "controller_scale": 0.05,
+                "reach_threshold": 0.02,
+                "lift_height": 0.90,
+                "global_xyz_bounds": [[-0.30, -0.40, 0.80], [0.30, 0.40, 1.00]],
+                "gripper_skill_params": {
+                    "num_max_step": 4
+                },
+                "reach_skill_params": {
+                    "num_max_step": 50,
+                    "global_param_bounds": [[-0.30, -0.40, 0.80], [0.30, 0.40, 1.00]]
+                },
+                "grasp_skill_params": {
+                    "num_max_step": 50,
+                    "num_reach_steps": 2,
+                    "global_param_bounds": [[-0.30, -0.40, 0.80], [0.30, 0.40, 0.85]]
+                },
+                "lift_skill_params": {
+                    "num_max_step": 50,
+                    "num_reach_steps": 2,
+                    "num_grasp_steps": 4,
+                    "global_param_bounds": [[-0.30, -0.40, 0.80], [0.30, 0.40, 1.00]]
+                },
+                "push_skill_params": {
+                    "num_max_step": 50,
+                    "global_param_bounds": [[-0.30, -0.40, 0.80], [0.30, 0.40, 0.85]],
+                    "delta_xyz_scale": [0.15, 0.15, 0.05]
+                }
+            }
+        },
+        "model_based_params": {
+            "use_abstraction_feature": false,
+            "use_current_state": false,
+            "fc_dims": [32, 32],
+            "activations": ["relu", "relu"],
+            "planner_type": "cem",
+            "std_scale": 1.0,
+            "n_horizon_step": 3,
+            "n_iter": 5,
+            "n_candidate": 64,
+            "n_top_candidate": 32,
+            "action_noise": 0.03,
+            "action_noise_eps": 0.05
+        }
+    },
+    "scripted_policy_params": {
+        "demo_prob_init": 0.0,
+        "demo_prob_final": 0.0,
+        "demo_annealing_start": 10000,
+        "demo_annealing_end": 500000,
+        "pick_place_params": {
+            "is_demo": false,
+            "release_prob": 0.015,
+            "noise_scale": 0.3,
+            "action_scaling": 4,
+            "push_prob": 0.5,
+            "random_ep_prob": 0.1,
+            "rough_grasp_prob": 0.6,
+            "rough_grasp_noise_scale": 0.1,
+            "rough_move_prob": 0.3,
+            "push_z": 0.82
+        }
+    }
+}
