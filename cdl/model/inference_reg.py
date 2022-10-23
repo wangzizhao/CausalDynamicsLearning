@@ -140,22 +140,21 @@ class InferenceReg(InferenceCMI):
         self.adjacency.flip_prob = self.flip_prob
         self.interv_mask.flip_prob = self.flip_prob
 
-    def loss(self, next_obses, pred_next_dist):
+    def update(self, obses, actions, next_obses, eval=False):
         """
-        loss = reconstruction loss + adjacency regularization + interv_mask regularization
-        :param next_obses: (bs, n_pred_step, obs_spec)
-        :param pred_next_dist: (full_dists, masked_dists, causal_dists) or (causal_dists,) only. For each distribution,
-            if continuous state space, its form is a (sample, mean, log_std) tuple,
-                each is a (bs, n_pred_step, feature_dim) tensor
-            if state space is discrete, its form is a (sample, logits) tuple,
-                each is a [(bs, n_pred_step, feature_i_dim)] * feature_dim list
-        :return:
+        :param obs: {obs_i_key: (bs, num_observation_steps, obs_i_shape)}
+        :param actions: (bs, num_pred_steps, action_dim)
+        :param next_obses: ({obs_i_key: (bs, num_pred_steps, obs_i_shape)}
+        :return: {"loss_name": loss_value}
         """
+        features = self.encoder(obses)
+        next_features = self.encoder(next_obses)
+        pred_next_dist = self.forward_with_feature(features, actions)
 
-        log_prob = self.eval_log_prob_from_dist(next_obses, pred_next_dist)[0]            # (bs, n_pred_step)
-        loss = -log_prob.sum(dim=-1).mean()
-
-        loss_detail = {"pred_loss": loss}
+        # prediction loss in the state / latent space
+        pred_loss = self.prediction_loss_from_dist(pred_next_dist, next_features)    # (bs, num_pred_steps)
+        loss = pred_loss = pred_loss.sum(dim=-1).mean()
+        loss_detail = {"pred_loss": pred_loss}
 
         if self.use_mask:
             # L1 reg for adjacency M and intervention mask I
@@ -165,69 +164,14 @@ class InferenceReg(InferenceCMI):
             loss_detail["reg_M"] = reg_M
             loss_detail["reg_I"] = reg_I
 
-        loss_detail["loss"] = loss
-
-        return loss, loss_detail
-
-    def update(self, obs, actions, next_obses, eval=False):
-        loss_detail = Inference.update(self, obs, actions, next_obses, eval)
+        if not eval:
+            self.backprop(loss, loss_detail)
 
         if self.abstraction_quested:
             self.should_update_abstraction = True
             self.should_update_abstracted_dynamics = True
 
         return loss_detail
-
-    def reward(self, obs, actions, next_obses, output_numpy=False):
-        """
-        Calculate reward for RL policy
-        :param obs: (bs, obs_spec) during policy training or (obs_spec,) after env.step()
-        :param actions: (bs, n_pred_step, action_dim) during policy training or (action_dim,) after env.step()
-        :param next_obses: (bs, n_pred_step, obs_spec) during policy training or (obs_spec,) after env.step()
-        :param output_numpy: output numpy or tensor
-        :return: (bs, n_pred_step,) or scalar
-        """
-        obs, actions, next_obses, reward_need_squeeze = self.preprocess(obs, actions, next_obses)
-
-        with torch.no_grad():
-            pred_next_dist = self.forward(obs, actions)
-            log_prob = self.eval_log_prob_from_dist(next_obses, pred_next_dist)[0]        # (bs, n_pred_step)
-            reward = -log_prob                                                  # (bs, n_pred_step)
-            reward = reward[..., None]                                          # (bs, n_pred_step, 1)
-            reward_bias = self.inference_params.reward_bias
-            reward_scale = self.inference_params.reward_scale
-            reward = torch.tanh((reward - reward_bias) / reward_scale)
-
-        reward = self.reward_postprocess(reward, reward_need_squeeze, output_numpy)
-
-        return reward
-
-    def eval_log_prob_from_obs(self, obs, actions, next_obses):
-        obs, actions, next_obses, _ = self.preprocess(obs, actions, next_obses)
-
-        with torch.no_grad():
-            pred_next_dist = self.forward(obs, actions)
-            # if state space is continuous, distribution is a tuple for (sample, mean, log_std), where each element is
-            # of shape (bs, feature_dim)
-            # otherwise, distribution is a tuple for (sample, logits), where each element is of shape
-            # [(bs, feature_i_dim)] * feature_dim
-            next_feature = self.target_encoder(next_obses)
-            # (bs, n_pred_step, feature_dim)
-            log_prob = self.eval_log_prob_from_dist(next_obses, pred_next_dist, keep_last_dim=True)[0]
-
-        if self.continuous_state:
-            _, mu, log_std = pred_next_dist
-            mu, log_std = to_numpy(mu), to_numpy(log_std)
-            dist = (mu, log_std)
-            next_feature = to_numpy(next_feature)
-        else:
-            _, dist = pred_next_dist
-            dist = [(to_numpy(dist_i[0]), to_numpy(dist_i[1])) if isinstance(dist_i, tuple) else to_numpy(dist_i)
-                    for dist_i in dist]
-            next_feature = [to_numpy(next_feature_i) for next_feature_i in next_feature]
-        log_prob = to_numpy(log_prob)
-
-        return dist, next_feature, log_prob
 
     def get_adjacency(self):
         if self.use_mask:

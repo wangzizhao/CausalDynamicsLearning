@@ -252,49 +252,45 @@ class Inference(nn.Module):
                 next_feature = next_feature.detach()
             else:
                 next_feature = [next_feature_i.detach() for next_feature_i in next_feature]
-            pred_loss = -self.log_prob_from_distribution(pred_dist, next_feature)   # (bs, n_pred_step, feature_dim)
+            pred_loss = -self.log_prob_from_distribution(pred_dist, next_feature)       # (bs, n_pred_step, feature_dim)
 
         if not keep_variable_dim:
             pred_loss = pred_loss.sum(dim=-1)                                           # (bs, n_pred_step)
 
         return pred_loss
 
-    def update(self, obs, actions, next_obses, eval=False):
+    def backprop(self, loss, loss_detail):
+        self.optimizer.zero_grad()
+        loss.backward()
+
+        grad_clip_norm = self.inference_params.grad_clip_norm
+        if not grad_clip_norm:
+            grad_clip_norm = np.inf
+        loss_detail["grad_norm"] = torch.nn.utils.clip_grad_norm_(self.parameters(), grad_clip_norm)
+
+        self.optimizer.step()
+        return loss_detail
+
+    def update(self, obses, actions, next_obses, eval=False):
         """
-        :param obs: {obs_i_key: (bs, obs_i_shape)}
-        :param actions: (bs, n_pred_step, action_dim)
-        :param next_obses: ({obs_i_key: (bs, n_pred_step, obs_i_shape)}
+        :param obs: {obs_i_key: (bs, num_observation_steps, obs_i_shape)}
+        :param actions: (bs, num_pred_steps, action_dim)
+        :param next_obses: ({obs_i_key: (bs, num_pred_steps, obs_i_shape)}
         :return: {"loss_name": loss_value}
         """
-        feature = self.encoder(obs)
-        next_feature = self.encoder(next_obses)
-        pred_next_dist = self.forward_with_feature(feature, actions)
+        features = self.encoder(obses)
+        next_features = self.encoder(next_obses)
+        pred_next_dist = self.forward_with_feature(features, actions)
 
         # prediction loss in the state / latent space
-        pred_loss = self.prediction_loss_from_dist(pred_next_dist, next_feature)    # (bs, n_pred_step)
+        pred_loss = self.prediction_loss_from_dist(pred_next_dist, next_features)    # (bs, num_pred_steps)
         loss = pred_loss = pred_loss.sum(dim=-1).mean()
         loss_detail = {"pred_loss": pred_loss}
 
         if not eval:
-            self.optimizer.zero_grad()
-            loss.backward()
-            loss_detail["grad_norm"] = self.grad_norm()
-
-            grad_clip_norm = self.inference_params.grad_clip_norm
-            if grad_clip_norm:
-                torch.nn.utils.clip_grad_norm_(self.parameters(), grad_clip_norm)
-
-            self.optimizer.step()
+            self.backprop(loss, loss_detail)
 
         return loss_detail
-
-    def grad_norm(self,):
-        total_norm = 0
-        for p in self.parameters():
-            param_norm = p.grad.data.norm(2) if p.grad is not None else 0
-            total_norm += param_norm ** 2
-        total_norm = total_norm ** (1. / 2)
-        return total_norm
 
     def update_mask(self, obs, actions, next_obses):
         raise NotImplementedError
@@ -342,15 +338,15 @@ class Inference(nn.Module):
         :param actions: (bs, n_pred_step, action_dim) during policy training or (action_dim,) after env.step()
         :param next_obses: (bs, n_pred_step, obs_spec) during policy training or (obs_spec,) after env.step()
         :param output_numpy: output numpy or tensor
-        :return: (bs, n_pred_step,) or scalar
+        :return: (bs, n_pred_step, 1) or scalar
         """
         obs, actions, next_obses, need_squeeze = self.preprocess(obs, actions, next_obses)
 
         with torch.no_grad():
             pred_next_dist = self.forward(obs, actions)
-            log_prob = self.eval_log_prob_from_dist(next_obses, pred_next_dist)     # (bs, n_pred_step)
-            reward = -log_prob                                                      # (bs, n_pred_step)
-            reward = reward[..., None]                                              # (bs, n_pred_step, 1)
+            next_features = self.encoder(next_obses)
+            reward = self.prediction_loss_from_dist(pred_next_dist, next_features)      # (bs, n_pred_step)
+            reward = reward[..., None]                                                  # (bs, n_pred_step, 1)
             reward_bias = self.inference_params.reward_bias
             reward_scale = self.inference_params.reward_scale
             reward = torch.tanh((reward - reward_bias) / reward_scale)

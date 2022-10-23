@@ -692,15 +692,7 @@ class InferenceCMI(Inference):
         loss = pred_loss
 
         if not eval and torch.isfinite(loss):
-            self.optimizer.zero_grad()
-            loss.backward()
-            loss_detail["grad_norm"] = self.grad_norm()
-
-            grad_clip_norm = self.inference_params.grad_clip_norm
-            if grad_clip_norm:
-                torch.nn.utils.clip_grad_norm_(self.parameters(), grad_clip_norm)
-
-            self.optimizer.step()
+            self.backprop(loss, loss_detail)
 
         return loss_detail
 
@@ -781,15 +773,17 @@ class InferenceCMI(Inference):
         :param actions: (bs, n_pred_step, action_dim) during policy training or (action_dim,) after env.step()
         :param next_obses: (bs, n_pred_step, obs_spec) during policy training or (obs_spec,) after env.step()
         :param output_numpy: output numpy or tensor
-        :return: (bs, n_pred_step,) or scalar
+        :return: (bs, n_pred_step, 1) or scalar
         """
         obs, actions, next_obses, reward_need_squeeze = self.preprocess(obs, actions, next_obses)
 
         with torch.no_grad():
-            pred_next_dist = self.forward(obs, actions, forward_mode=("full", "causal",))
-            # (bs, n_pred_step), (bs, n_pred_step)
-            full_log_prob, causal_log_prob = self.eval_log_prob_from_dist(next_obses, pred_next_dist)
-            causal_pred_reward = -causal_log_prob
+            full_next_dist, causal_next_dist = self.forward(obs, actions, forward_mode=("full", "causal",))
+            next_features = self.encoder(next_obses)
+            full_neg_log_prob = self.prediction_loss_from_dist(full_next_dist, next_features)       # (bs, n_pred_step)
+            causal_neg_log_prob = self.prediction_loss_from_dist(causal_next_dist, next_features)   # (bs, n_pred_step)
+
+            causal_pred_reward = full_neg_log_prob
 
             normalized_causal_pred_reward = torch.tanh((causal_pred_reward - self.causal_pred_reward_mean) /
                                                        (self.causal_pred_reward_std * 2))
@@ -801,10 +795,10 @@ class InferenceCMI(Inference):
                 self.causal_pred_reward_mean = self.causal_pred_reward_mean * tau + batch_mean * (1 - tau)
                 self.causal_pred_reward_std = self.causal_pred_reward_std * tau + batch_std * (1 - tau)
 
-            pred_diff_reward = full_log_prob - causal_log_prob                  # (bs, n_pred_step)
+            pred_diff_reward = causal_neg_log_prob - full_neg_log_prob                  # (bs, n_pred_step)
             normalized_pred_diff_reward = torch.tanh(pred_diff_reward / (self.pred_diff_reward_std * 2))
             if len(pred_diff_reward) > 0:
-                batch_std = causal_pred_reward.std(dim=0, unbiased=False)
+                batch_std = pred_diff_reward.std(dim=0, unbiased=False)
                 self.pred_diff_reward_std = self.pred_diff_reward_std * tau + batch_std * (1 - tau)
 
             causal_pred_reward_weight = self.cmi_params.causal_pred_reward_weight
